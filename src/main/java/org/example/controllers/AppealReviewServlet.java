@@ -1,0 +1,87 @@
+package org.example.controllers;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+import org.example.daos.AppealDAO;
+import org.example.daos.AppealDAOImpl;
+import org.example.models.Account;
+import org.example.models.AccountAppeal;
+
+import java.io.IOException;
+import java.util.List;
+
+@WebServlet("/admin/appeals")
+public class AppealReviewServlet extends HttpServlet {
+
+    private final AppealDAO dao = new AppealDAOImpl();
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+            throws ServletException, IOException {
+        if (!requireAdmin(req, resp)) return;
+
+        List<AccountAppeal> pending = dao.findPending();
+        List<AccountAppeal> all = dao.findAll();
+        req.setAttribute("pendingAppeals", pending);
+        req.setAttribute("allAppeals", all);
+        req.setAttribute("pendingCount", pending.size());
+        req.getRequestDispatcher("/admin/appeals.jsp").forward(req, resp);
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp)
+            throws ServletException, IOException {
+        if (!requireAdmin(req, resp)) return;
+        req.setCharacterEncoding("UTF-8");
+
+        String action = req.getParameter("action");
+        long appealId = parseLong(req.getParameter("appealId"));
+        long accountId = parseLong(req.getParameter("accountId"));
+        String adminNote = req.getParameter("adminNote");
+        if (adminNote == null) adminNote = "";
+
+        // Chan duyet/tu choi lai mot appeal da o trang thai cuoi (APPROVED/REJECTED): tranh
+        // double-submit goi lai approve() lam restore tai khoan (is_deleted=0, status=ACTIVE,
+        // bom_count=0) nhieu lan, hoac approve roi lai reject tren cung 1 appeal gay mau thuan.
+        AccountAppeal current = dao.findById(appealId);
+        if (current == null) {
+            resp.sendRedirect(req.getContextPath() + "/admin/appeals?error=not_found");
+            return;
+        }
+        String currentStatus = current.getStatus() == null ? "" : current.getStatus().toUpperCase();
+        if ("APPROVED".equals(currentStatus) || "REJECTED".equals(currentStatus)) {
+            resp.sendRedirect(req.getContextPath() + "/admin/appeals?error=already_reviewed");
+            return;
+        }
+
+        if ("approve".equals(action)) {
+            boolean ok = dao.approve(appealId, accountId, adminNote.trim());
+            resp.sendRedirect(req.getContextPath() + "/admin/appeals?"
+                    + (ok ? "success=approved" : "error=already_reviewed"));
+        } else if ("reject".equals(action)) {
+            boolean ok = dao.reject(appealId, adminNote.trim());
+            resp.sendRedirect(req.getContextPath() + "/admin/appeals?"
+                    + (ok ? "success=rejected" : "error=already_reviewed"));
+        } else {
+            resp.sendRedirect(req.getContextPath() + "/admin/appeals");
+        }
+    }
+
+    private boolean requireAdmin(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        HttpSession session = req.getSession(false);
+        Account account = session != null ? (Account) session.getAttribute("account") : null;
+        if (account == null || account.getRoleId() != 1) {
+            resp.sendRedirect(req.getContextPath() + "/dangnhap");
+            return false;
+        }
+        return true;
+    }
+
+    private long parseLong(String val) {
+        try { return Long.parseLong(val); } catch (Exception e) { return 0; }
+    }
+}

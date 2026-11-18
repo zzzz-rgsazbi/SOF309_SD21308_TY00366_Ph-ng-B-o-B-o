@@ -21,6 +21,10 @@ bin/
 *.jar
 *.war
 
+# Secrets & Local Configs
+src/main/resources/config.properties
+.smarttomcat/
+
 # Private / Lecturer materials (Không đưa lên Git của SV)
 *.pdf
 *.docx

@@ -2,9 +2,9 @@ name: CI Automation Test
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, Bao ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, Bao ]
   workflow_dispatch:
 
 jobs:

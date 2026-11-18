@@ -1,0 +1,341 @@
+package org.example.controllers;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+import org.example.daos.AccountDAO;
+import org.example.daos.AccountDAOImpl;
+import org.example.daos.NotificationDAO;
+import org.example.daos.NotificationDAOImpl;
+import org.example.daos.OrderDAO;
+import org.example.daos.OrderDAOImpl;
+import org.example.daos.OrderLogDAO;
+import org.example.daos.OrderLogDAOImpl;
+import org.example.daos.ShopDAO;
+import org.example.daos.ShopDAOImpl;
+import org.example.daos.ShopWalletDAO;
+import org.example.daos.ShopWalletDAOImpl;
+import org.example.models.Account;
+import org.example.models.Notification;
+import org.example.models.Order;
+import org.example.models.OrderLog;
+import org.example.models.Shop;
+import org.example.utils.BillUtil;
+import org.example.utils.ExcelExportUtil;
+import org.example.utils.PayOSUtil;
+import org.example.utils.PdfExportUtil;
+
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Shop owner bam "Xem hoa don" cho cac don hang thuoc shop cua minh: danh sach don hang +
+ * xem/in hoa don chi tiet, dung chung BillUtil voi luong checkout cua khach hang (/checkout, /bill).
+ */
+@WebServlet("/shop/bills")
+public class ShopBillServlet extends HttpServlet {
+    private static final String LIST_VIEW = "/shop/Quanlybill.jsp";
+    private static final String DETAIL_VIEW = "/shop/HoaDonShop.jsp";
+
+    private final OrderDAO orderDAO = new OrderDAOImpl();
+    private final ShopDAO shopDAO = new ShopDAOImpl();
+    private final OrderLogDAO orderLogDAO = new OrderLogDAOImpl();
+    private final AccountDAO accountDAO = new AccountDAOImpl();
+    private final NotificationDAO notificationDAO = new NotificationDAOImpl();
+    private final ShopWalletDAO shopWalletDAO = new ShopWalletDAOImpl();
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("UTF-8");
+
+        HttpSession session = req.getSession(false);
+        Account account = session == null ? null : (Account) session.getAttribute("account");
+        if (account == null || account.getRoleId() != 2) {
+            resp.sendRedirect(req.getContextPath() + "/dangnhap");
+            return;
+        }
+
+        Shop shop = shopDAO.selectShopByOwnerId(account.getId());
+        if (shop == null) {
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?error=no_shop");
+            return;
+        }
+
+        String action = req.getParameter("action");
+        Long orderId = parseId(req.getParameter("orderId"));
+        if (orderId == null) {
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?error=invalid");
+            return;
+        }
+
+        Order order = orderDAO.findById(orderId);
+        if (order == null || order.getShopId() != shop.getId()) {
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?error=not_found");
+            return;
+        }
+
+        if ("confirm".equals(action) && "PENDING".equalsIgnoreCase(order.getStaTus())) {
+            // Chỉ cho xác nhận khi đã có shipper nhận đơn
+            if (order.getShipperId() <= 0) {
+                resp.sendRedirect(req.getContextPath() + "/shop/bills?error=no_shipper");
+                return;
+            }
+            orderDAO.updateStatus(orderId, "CONFIRMED");
+            OrderLog log = new OrderLog();
+            log.setOrderId(orderId);
+            log.setChangedBy(account.getId());
+            log.setOldStatus("PENDING");
+            log.setNewStatus("CONFIRMED");
+            log.setNote("Shop xac nhan don hang sau khi shipper da nhan");
+            orderLogDAO.create(log);
+            notifyCustomer(order, "✅ Đơn hàng #" + orderId + " đã được xác nhận",
+                    shop.getShopName() + " đã xác nhận đơn của bạn, đang chuẩn bị món.");
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?success=confirmed");
+        } else if ("prepared".equals(action) && "CONFIRMED".equalsIgnoreCase(order.getStaTus())) {
+            orderDAO.updateStatus(orderId, "READY_FOR_PICKUP");
+            OrderLog log = new OrderLog();
+            log.setOrderId(orderId);
+            log.setChangedBy(account.getId());
+            log.setOldStatus("CONFIRMED");
+            log.setNewStatus("READY_FOR_PICKUP");
+            log.setNote("Shop da chuan bi xong mon, cho shipper den lay hang");
+            orderLogDAO.create(log);
+            notifyCustomer(order, "📦 Đơn hàng #" + orderId + " đã chuẩn bị xong",
+                    shop.getShopName() + " đã chuẩn bị xong món, đang chờ shipper đến lấy hàng.");
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?success=prepared");
+        } else if ("cancel".equals(action)
+                && ("PENDING".equalsIgnoreCase(order.getStaTus()) || "CONFIRMED".equalsIgnoreCase(order.getStaTus()))) {
+            String oldStatus = order.getStaTus();
+            // Da thanh toan (PayOS hoac chuyen khoan tay) deu phai mark REFUNDED khi huy don,
+            // khong chi rieng PayOS - huy link PayOS chi la buoc phu them khi shop co cau hinh PayOS.
+            String paymentStatus = order.getPaymentStatus();
+            boolean wasPaid = "PAID".equalsIgnoreCase(paymentStatus);
+            if (wasPaid) {
+                if (shop.getClientKey() != null && shop.getApiKey() != null) {
+                    PayOSUtil.cancelPaymentLink(shop.getClientKey(), shop.getApiKey(), orderId, "Shop hủy đơn");
+                }
+                // Deduct from shop wallet (shop hasn't been credited yet at cancel stage, but mark REFUNDED)
+                orderDAO.updatePaymentStatus(orderId, shop.getId(), "REFUNDED");
+            }
+            // BAO LOI: truoc day thieu dong nay - don bi "huy" van con nguyen trang thai PENDING/CONFIRMED
+            // trong DB, khien don van co the bi gan shipper/xac nhan/chuan bi tiep, va shop co the bam
+            // "Huy" lai nhieu lan (goi lai PayOS cancel + REFUNDED + thong bao trung lap).
+            orderDAO.updateStatus(orderId, "CANCELLED");
+            OrderLog log = new OrderLog();
+            log.setOrderId(orderId);
+            log.setChangedBy(account.getId());
+            log.setOldStatus(oldStatus);
+            log.setNewStatus("CANCELLED");
+            log.setNote("Shop huy don hang");
+            orderLogDAO.create(log);
+            String cancelMsg = wasPaid
+                ? shop.getShopName() + " đã hủy đơn của bạn. Vào mục \"Đơn hàng\" → bấm \"↩️ Yêu cầu hoàn tiền\" để được hoàn lại tiền."
+                : shop.getShopName() + " đã hủy đơn của bạn. Vui lòng liên hệ shop nếu cần hỗ trợ.";
+            notifyCustomer(order, "❌ Đơn hàng #" + orderId + " đã bị hủy", cancelMsg);
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?success=cancelled");
+        } else {
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?error=invalid_action");
+        }
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("UTF-8");
+
+        HttpSession session = req.getSession(false);
+        Account account = session == null ? null : (Account) session.getAttribute("account");
+        if (account == null || account.getRoleId() != 2) {
+            resp.sendRedirect(req.getContextPath() + "/dangnhap");
+            return;
+        }
+
+        Shop shop = shopDAO.selectShopByOwnerId(account.getId());
+        if (shop == null) {
+            req.setAttribute("loi", "Ban chua co cua hang! Vui long dang ky shop.");
+            req.getRequestDispatcher(LIST_VIEW).forward(req, resp);
+            return;
+        }
+        req.setAttribute("currentShop", shop);
+        session.setAttribute("currentShop", shop);
+
+        String action = req.getParameter("action");
+        if ("view".equals(action)) {
+            showBill(req, resp, shop);
+            return;
+        }
+        if ("exportPdf".equals(action)) {
+            exportBillPdf(req, resp, shop);
+            return;
+        }
+
+        String keyword = normalize(req.getParameter("q"));
+        String dateFilter = normalize(req.getParameter("date"));
+        String statusFilter = normalize(req.getParameter("status")).toUpperCase(Locale.ROOT);
+        String methodFilter = normalize(req.getParameter("method")).toUpperCase(Locale.ROOT);
+
+        List<Order> orders = filterOrders(orderDAO.findByShopId(shop.getId()), keyword, dateFilter, statusFilter, methodFilter);
+
+        if ("exportExcel".equals(action)) {
+            exportOrdersExcel(resp, shop, orders);
+            return;
+        }
+
+        req.setAttribute("orderList", orders);
+        req.setAttribute("q", keyword);
+        req.setAttribute("dateFilter", dateFilter);
+        req.setAttribute("statusFilter", statusFilter);
+        req.setAttribute("methodFilter", methodFilter);
+
+        req.getRequestDispatcher(LIST_VIEW).forward(req, resp);
+    }
+
+    private List<Order> filterOrders(List<Order> orders, String keyword, String dateFilter, String statusFilter, String methodFilter) {
+        List<Order> result = new ArrayList<>();
+        String kw = keyword.toLowerCase(Locale.ROOT);
+
+        for (Order o : orders) {
+            // Shop chỉ thấy đơn PENDING khi shipper đã nhận (shipperId > 0).
+            // Đơn PENDING chưa có shipper là đang chờ shipper trên app — shop chưa cần biết.
+            if ("PENDING".equalsIgnoreCase(o.getStaTus()) && o.getShipperId() <= 0) continue;
+
+            if (!kw.isEmpty()) {
+                String haystack = (("#" + o.getId()) + " " + o.getReceiverName() + " " + o.getReceiverPhone()).toLowerCase(Locale.ROOT);
+                if (!haystack.contains(kw)) continue;
+            }
+            if (!dateFilter.isEmpty()) {
+                if (o.getCreatedAt() == null) continue;
+                LocalDate created = o.getCreatedAt().toLocalDate();
+                if (!created.toString().equals(dateFilter)) continue;
+            }
+            if (!statusFilter.isEmpty() && !"ALL".equals(statusFilter)) {
+                if ("CANCELLED".equals(statusFilter)) {
+                    if (!"CANCELLED".equalsIgnoreCase(o.getStaTus())) continue;
+                } else {
+                    String paymentStatus = o.getPaymentStatus() == null ? "UNPAID" : o.getPaymentStatus().toUpperCase(Locale.ROOT);
+                    if ("CANCELLED".equalsIgnoreCase(o.getStaTus())) continue;
+                    if (!statusFilter.equals(paymentStatus)) continue;
+                }
+            }
+            if (!methodFilter.isEmpty() && !"ALL".equals(methodFilter)) {
+                if (!methodFilter.equals(normalizePaymentMethod(o.getPaymentMethod()))) continue;
+            }
+            result.add(o);
+        }
+        return result;
+    }
+
+    /** COD/null/bất kỳ giá trị khác BANK, PAYOS đều coi là tiền mặt tại quầy. */
+    private String normalizePaymentMethod(String paymentMethod) {
+        String value = paymentMethod == null ? "" : paymentMethod.trim().toUpperCase(Locale.ROOT);
+        if ("BANK".equals(value) || "PAYOS".equals(value)) {
+            return value;
+        }
+        return "COD";
+    }
+
+    private void showBill(HttpServletRequest req, HttpServletResponse resp, Shop shop) throws ServletException, IOException {
+        Long orderId = parseId(req.getParameter("id"));
+        Order order = orderId == null ? null : orderDAO.findById(orderId);
+
+        if (order == null || order.getShopId() != shop.getId()) {
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?error=not_found");
+            return;
+        }
+
+        if ("modal".equals(req.getParameter("as"))) {
+            List<Order> orders = filterOrders(orderDAO.findByShopId(shop.getId()), "", "", "", "");
+            req.setAttribute("orderList", orders);
+            req.setAttribute("bill", BillUtil.build(order));
+            req.setAttribute("modalMode", "readonly");
+            req.getRequestDispatcher(LIST_VIEW).forward(req, resp);
+            return;
+        }
+
+        req.setAttribute("bill", BillUtil.build(order));
+        req.getRequestDispatcher(DETAIL_VIEW).forward(req, resp);
+    }
+
+    private void exportBillPdf(HttpServletRequest req, HttpServletResponse resp, Shop shop) throws IOException {
+        Long orderId = parseId(req.getParameter("id"));
+        Order order = orderId == null ? null : orderDAO.findById(orderId);
+        if (order == null || order.getShopId() != shop.getId()) {
+            resp.sendRedirect(req.getContextPath() + "/shop/bills?error=not_found");
+            return;
+        }
+
+        byte[] pdf = PdfExportUtil.buildInvoicePdf(BillUtil.build(order));
+        resp.setContentType("application/pdf");
+        resp.setHeader("Content-Disposition", "attachment; filename=\"hoa-don-" + order.getId() + ".pdf\"");
+        resp.setContentLength(pdf.length);
+        resp.getOutputStream().write(pdf);
+        resp.getOutputStream().flush();
+    }
+
+    private void exportOrdersExcel(HttpServletResponse resp, Shop shop, List<Order> orders) throws IOException {
+        String[] headers = {"Ma don", "Nguoi nhan", "SDT", "Dia chi", "Tong tien", "Hinh thuc", "Thanh toan", "Trang thai", "Ngay tao"};
+        List<Object[]> rows = new ArrayList<>();
+        double tongDoanhThu = 0;
+        for (Order o : orders) {
+            rows.add(new Object[]{
+                    "#" + o.getId(),
+                    o.getReceiverName(),
+                    o.getReceiverPhone(),
+                    o.getShippingAddress(),
+                    o.getTotalPrice(),
+                    normalizePaymentMethod(o.getPaymentMethod()),
+                    o.getPaymentStatus(),
+                    o.getStaTus(),
+                    o.getCreatedAt() != null ? o.getCreatedAt().toString() : ""
+            });
+            if (o.getTotalPrice() != null && !"CANCELLED".equalsIgnoreCase(o.getStaTus())) {
+                tongDoanhThu += o.getTotalPrice();
+            }
+        }
+        rows.add(new Object[]{"", "", "", "", "", "", "", "", ""});
+        rows.add(new Object[]{"TONG DOANH THU (khong tinh don huy)", "", "", "", tongDoanhThu, "", "", "", ""});
+
+        byte[] excel = ExcelExportUtil.export("DoanhThu", "Doanh thu - " + shop.getShopName(), headers, rows);
+        resp.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        resp.setHeader("Content-Disposition", "attachment; filename=\"doanh-thu-shop-" + shop.getId() + ".xlsx\"");
+        resp.setContentLength(excel.length);
+        resp.getOutputStream().write(excel);
+        resp.getOutputStream().flush();
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private Long parseId(String value) {
+        try {
+            String normalized = value == null ? "" : value.trim();
+            return normalized.isEmpty() ? null : Long.parseLong(normalized);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void notifyCustomer(Order order, String title, String message) {
+        Notification n = new Notification();
+        n.setAccountId(order.getUserId());
+        n.setTitle(title);
+        n.setMessage(message);
+        notificationDAO.create(n);
+    }
+
+    /** Chong IDOR/gan bua: shipperId gui len phai la 1 shipper (role=4) dang ACTIVE va online that su. */
+    private boolean isValidOnlineShipper(long shipperId) {
+        for (Account a : accountDAO.findOnlineShippers()) {
+            if (a.getId() == shipperId) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

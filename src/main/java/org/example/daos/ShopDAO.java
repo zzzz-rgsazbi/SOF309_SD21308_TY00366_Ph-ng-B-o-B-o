@@ -1,0 +1,32 @@
+package org.example.daos;
+
+
+import org.example.models.DailyOrderStat;
+import org.example.models.Shop;
+import org.example.models.ShopRevenueStat;
+
+import java.util.List;
+
+public interface ShopDAO {
+    List<Shop> selectAllShops();
+    List<Shop> selectPendingShops();
+    Shop selectShopById(long id);
+    Shop selectShopByOwnerId(long ownerId);
+    void insertShop(Shop shop);
+    void updateShop(Shop shop);
+    boolean updateShopApproval(long shopId, String status, String rejectionReason, long approvedBy);
+    void deleteShop(long id); // Xóa mềm (set isDeleted = true)
+    int countPendingShops();
+    int countBlockedShops();
+    List<Shop> findTop5PendingShops();
+    double getTotalRevenue();
+    List<ShopRevenueStat> findTop5ShopsByRevenue();
+    List<DailyOrderStat> findDailyOrderStats(int days);
+    /** Sua rieng % hoa hong cua 1 shop (null = xoa override, dung lai mac dinh he thong). */
+    boolean updateCommissionRate(long shopId, Double commissionRate);
+
+    boolean updateBankInfo(long shopId, String bankCode, String bankAccountNumber, String bankAccountName);
+
+    /** Tim cac shop co san pham (mon an) khop tu khoa, dung cho tinh nang search theo mon an. */
+    List<Shop> searchShopsByProductName(String keyword);
+}

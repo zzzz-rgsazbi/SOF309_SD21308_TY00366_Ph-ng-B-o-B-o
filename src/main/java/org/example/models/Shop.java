@@ -1,0 +1,327 @@
+package org.example.models;
+
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.Map;
+
+public class Shop {
+    private long id;
+    private long ownerId;
+    private String shopName;
+    private String shopDescription;
+    private String shopAddress;
+    private String shopPhone;
+    private String shopLogo;
+
+    private String clientKey;
+    private String apiKey;
+    private String checkSumKey;
+    private Double locationX;
+    private Double locationY;
+
+    private LocalTime openTime;
+    private LocalTime closeTime;
+    private Double commissionRate; // % hoa hong rieng cua shop nay, null = dung mac dinh he thong
+
+    private String bankCode;           // Ma BIN ngan hang theo chuan VietQR/NAPAS, vd "970436" = Vietcombank
+    private String bankAccountNumber;
+    private String bankAccountName;
+
+    private String status;
+    private String rejectionReason;
+    private long approvedBy;
+    private LocalDateTime approveDate;
+    private boolean isDeleted;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+
+    public Shop() {
+    }
+
+    public Shop(long id, long ownerId, String shopName, String shopDescription, String shopAddress, String shopPhone, String shopLogo, String clientKey, String apiKey, String checkSumKey, Double locationX, Double locationY, String status, String rejectionReason, long approvedBy, LocalDateTime approveDate, boolean isDeleted, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this.id = id;
+        this.ownerId = ownerId;
+        this.shopName = shopName;
+        this.shopDescription = shopDescription;
+        this.shopAddress = shopAddress;
+        this.shopPhone = shopPhone;
+        this.shopLogo = shopLogo;
+        this.clientKey = clientKey;
+        this.apiKey = apiKey;
+        this.checkSumKey = checkSumKey;
+        this.locationX = locationX;
+        this.locationY = locationY;
+        this.status = status;
+        this.rejectionReason = rejectionReason;
+        this.approvedBy = approvedBy;
+        this.approveDate = approveDate;
+        this.isDeleted = isDeleted;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+    }
+
+    public long getId() {
+        return id;
+    }
+
+    public void setId(long id) {
+        this.id = id;
+    }
+
+    public long getOwnerId() {
+        return ownerId;
+    }
+
+    public void setOwnerId(long ownerId) {
+        this.ownerId = ownerId;
+    }
+
+    public String getShopName() {
+        return shopName;
+    }
+
+    public void setShopName(String shopName) {
+        this.shopName = shopName;
+    }
+
+    public String getShopDescription() {
+        return shopDescription;
+    }
+
+    public void setShopDescription(String shopDescription) {
+        this.shopDescription = shopDescription;
+    }
+
+    public String getShopAddress() {
+        return shopAddress;
+    }
+
+    public void setShopAddress(String shopAddress) {
+        this.shopAddress = shopAddress;
+    }
+
+    public String getShopPhone() {
+        return shopPhone;
+    }
+
+    public void setShopPhone(String shopPhone) {
+        this.shopPhone = shopPhone;
+    }
+
+    public String getShopLogo() {
+        return shopLogo;
+    }
+
+    public void setShopLogo(String shopLogo) {
+        this.shopLogo = shopLogo;
+    }
+
+    public String getClientKey() {
+        return clientKey;
+    }
+
+    public void setClientKey(String clientKey) {
+        this.clientKey = clientKey;
+    }
+
+    public String getApiKey() {
+        return apiKey;
+    }
+
+    public void setApiKey(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
+    public String getCheckSumKey() {
+        return checkSumKey;
+    }
+
+    public void setCheckSumKey(String checkSumKey) {
+        this.checkSumKey = checkSumKey;
+    }
+
+    public Double getLocationX() {
+        return locationX;
+    }
+
+    public void setLocationX(Double locationX) {
+        this.locationX = locationX;
+    }
+
+    public Double getLocationY() {
+        return locationY;
+    }
+
+    public void setLocationY(Double locationY) {
+        this.locationY = locationY;
+    }
+
+    public LocalTime getOpenTime() {
+        return openTime;
+    }
+
+    public void setOpenTime(LocalTime openTime) {
+        this.openTime = openTime;
+    }
+
+    public LocalTime getCloseTime() {
+        return closeTime;
+    }
+
+    public void setCloseTime(LocalTime closeTime) {
+        this.closeTime = closeTime;
+    }
+
+    /**
+     * Chưa cấu hình giờ mở/đóng cửa (openTime hoặc closeTime null) thì coi như luôn mở,
+     * để không phá vỡ hành vi của các shop đã tạo trước tính năng này.
+     */
+    public boolean isOpenNow() {
+        if (openTime == null || closeTime == null) return true;
+        LocalTime now = LocalTime.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"));
+        if (openTime.isBefore(closeTime)) {
+            return !now.isBefore(openTime) && now.isBefore(closeTime);
+        }
+        if (openTime.equals(closeTime)) {
+            return true; // mở/đóng trùng giờ = coi như mở 24h
+        }
+        // Khung giờ qua đêm, vd 18:00 -> 02:00
+        return !now.isBefore(openTime) || now.isBefore(closeTime);
+    }
+
+    public Double getCommissionRate() {
+        return commissionRate;
+    }
+
+    public void setCommissionRate(Double commissionRate) {
+        this.commissionRate = commissionRate;
+    }
+
+    private static final Map<String, String> BANK_NAMES_BY_CODE = Map.of(
+            "970436", "Vietcombank",
+            "970422", "MB Bank",
+            "970432", "VPBank",
+            "970407", "Techcombank",
+            "970416", "ACB",
+            "970418", "BIDV",
+            "970415", "VietinBank",
+            "970405", "Agribank"
+    );
+
+    public String getBankCode() {
+        return bankCode;
+    }
+
+    public void setBankCode(String bankCode) {
+        this.bankCode = bankCode;
+    }
+
+    /** Tên ngân hàng hiển thị tương ứng bankCode (danh sách phải khớp option trong Shopprofile.jsp). */
+    public String getBankNameDisplay() {
+        return bankCode == null ? "" : BANK_NAMES_BY_CODE.getOrDefault(bankCode, bankCode);
+    }
+
+    /** true nếu shop đã điền đủ ngân hàng/STK/tên chủ TK để rút tiền. */
+    public boolean isHasBankInfo() {
+        return bankCode != null && !bankCode.isBlank()
+                && bankAccountNumber != null && !bankAccountNumber.isBlank()
+                && bankAccountName != null && !bankAccountName.isBlank();
+    }
+
+    public String getBankAccountNumber() {
+        return bankAccountNumber;
+    }
+
+    public void setBankAccountNumber(String bankAccountNumber) {
+        this.bankAccountNumber = bankAccountNumber;
+    }
+
+    public String getBankAccountName() {
+        return bankAccountName;
+    }
+
+    public void setBankAccountName(String bankAccountName) {
+        this.bankAccountName = bankAccountName;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
+    }
+
+    public long getApprovedBy() {
+        return approvedBy;
+    }
+
+    public void setApprovedBy(long approvedBy) {
+        this.approvedBy = approvedBy;
+    }
+
+    public LocalDateTime getApproveDate() {
+        return approveDate;
+    }
+
+    public void setApproveDate(LocalDateTime approveDate) {
+        this.approveDate = approveDate;
+    }
+
+    public boolean isDeleted() {
+        return isDeleted;
+    }
+
+    public void setDeleted(boolean deleted) {
+        isDeleted = deleted;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    @Override
+    public String toString() {
+        return "Shop{" +
+                "id=" + id +
+                ", ownerId=" + ownerId +
+                ", shopName='" + shopName + '\'' +
+                ", shopDescription='" + shopDescription + '\'' +
+                ", shopAddress='" + shopAddress + '\'' +
+                ", shopPhone='" + shopPhone + '\'' +
+                ", shopLogo='" + shopLogo + '\'' +
+                ", clientKey='" + clientKey + '\'' +
+                ", apiKey='" + apiKey + '\'' +
+                ", checkSumKey='" + checkSumKey + '\'' +
+                ", locationX=" + locationX +
+                ", locationY=" + locationY +
+                ", status='" + status + '\'' +
+                ", rejectionReason='" + rejectionReason + '\'' +
+                ", approvedBy=" + approvedBy +
+                ", approveDate=" + approveDate +
+                ", isDeleted=" + isDeleted +
+                ", createdAt=" + createdAt +
+                ", updatedAt=" + updatedAt +
+                '}';
+    }
+}
