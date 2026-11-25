@@ -9,70 +9,99 @@
 * **Mã sinh viên:** TY00366
 * **Lớp:** SD21308
 * **Môn học:** SOF309 - Kiểm thử nâng cao cùng AI
+* **Giảng viên hướng dẫn:** ThS. Trần Quang Bình (binhtq7 - Thầy Mười Giáo)
 * **Công nghệ nền tảng:**
   * Backend: Java 17, Jakarta Servlet 6.0, Jakarta WebSocket, JDBC
   * Database: Microsoft SQL Server (`mssql-jdbc`)
   * Frontend: JSP, JSTL, HTML5, CSS3 (Theme Stitch/Dashboard), Leaflet Map (OpenStreetMap)
   * Server: Apache Tomcat 10+
   * Thư viện bổ trợ: BCrypt (mã hóa mật khẩu), JavaMail (gửi OTP), Apache POI (xuất Excel), iText (xuất PDF hóa đơn)
-  * Framework kiểm thử: JUnit 5, Selenium WebDriver 4
+  * Framework kiểm thử: JUnit 5 (Jupiter 5.13.4), Selenium WebDriver 4
 * **URL chạy local:** `http://localhost:8080`
 
 ---
 
 ## 2. PHÂN QUYỀN HỆ THỐNG (ROLES & PERMISSIONS)
 Hệ thống hỗ trợ 4 phân quyền chính thông qua Servlet Filter (`AuthFilter`):
-1. **Super Admin (Role ID = 1):** Quản trị toàn hệ thống, duyệt yêu cầu mở quán của đối tác shop, kiểm duyệt nội dung món ăn & bình luận (lọc từ khóa cấm), quản lý voucher sàn, đối soát doanh thu, báo cáo vận hành và xem heatmap đơn hàng.
-2. **Chủ quán / Shop Owner (Role ID = 2):** Quản lý hồ sơ quán (giờ mở/đóng cửa, tọa độ quán), danh mục sản phẩm, món ăn theo từng size (giá theo size, trạng thái hết hàng tạm thời), loại topping và danh mục topping liên kết, quản lý đơn hàng (`PENDING` $\rightarrow$ `CONFIRMED` $\rightarrow$ `READY_FOR_PICKUP`), bán hàng tại quầy (POS), xuất hóa đơn PDF và báo cáo Excel.
-3. **Khách hàng / User (Role ID = 3):** Đăng ký/đăng nhập, tìm kiếm quán ăn và thực đơn, tùy chọn size và topping cho món ăn, quản lý giỏ hàng, đặt hàng và chọn tọa độ giao hàng trên bản đồ tương tác Leaflet, áp dụng mã giảm giá (Voucher), theo dõi hành trình đơn hàng và vị trí shipper realtime qua WebSocket, tích điểm đổi voucher, gửi khiếu nại đơn hàng.
-4. **Tài xế / Shipper (Role ID = 4):** Đăng ký hồ sơ shipper, nhận đơn hàng (`READY_FOR_PICKUP` $\rightarrow$ `SHIPPING` $\rightarrow$ `DONE`), cập nhật vị trí GPS realtime qua WebSocket, định tuyến lộ trình giao hàng tối ưu OSRM trên bản đồ, quản lý ví và yêu cầu rút tiền.
+1. **Super Admin (Role ID = 1):** Quản trị toàn hệ thống, duyệt yêu cầu mở quán của đối tác shop, kiểm duyệt nội dung món ăn & bình luận (lọc từ khóa cấm), quản lý voucher sàn, đối soát doanh thu, báo cáo vận hành và xem heatmap đơn hàng. URL điều hướng: `/tong-quan`.
+2. **Chủ quán / Shop Owner (Role ID = 2):** Quản lý hồ sơ quán (giờ mở/đóng cửa, tọa độ quán), danh mục sản phẩm, món ăn theo từng size (giá theo size, trạng thái hết hàng tạm thời), loại topping và danh mục topping liên kết, quản lý đơn hàng (`PENDING` $\rightarrow$ `CONFIRMED` $\rightarrow$ `READY_FOR_PICKUP`), bán hàng tại quầy (POS), xuất hóa đơn PDF và báo cáo Excel. URL điều hướng: `/shop`.
+3. **Khách hàng / User (Role ID = 3):** Đăng ký/đăng nhập, tìm kiếm quán ăn và thực đơn, tùy chọn size và topping cho món ăn, quản lý giỏ hàng, đặt hàng và chọn tọa độ giao hàng trên bản đồ tương tác Leaflet, áp dụng mã giảm giá (Voucher), theo dõi hành trình đơn hàng và vị trí shipper realtime qua WebSocket, tích điểm đổi voucher, gửi khiếu nại đơn hàng. URL điều hướng: `/user/home`.
+4. **Tài xế / Shipper (Role ID = 4):** Đăng ký hồ sơ shipper, nhận đơn hàng (`READY_FOR_PICKUP` $\rightarrow$ `SHIPPING` $\rightarrow$ `DONE`), cập nhật vị trí GPS realtime qua WebSocket, định tuyến lộ trình giao hàng tối ưu OSRM trên bản đồ, quản lý ví và yêu cầu rút tiền. URL điều hướng: `/shipper/donhang`.
 
 ---
 
-## 3. QUY TẮC NGHIỆP VỤ CHI TIẾT (BUSINESS RULES)
+## 3. QUY TẮC NGHIỆP VỤ & RÀNG BUỘC KIỂM THỬ (BUSINESS RULES & VALIDATION CONSTRAINTS)
 
 ### 3.1. Phân hệ Xác thực & Tài khoản (Authentication & Account)
-* **Đăng ký tài khoản (`/dangky`):**
-  * `username`: Bắt buộc, độ dài từ 5 đến 50 ký tự, không chứa ký tự đặc biệt nguy hiểm, không được trùng lặp trong hệ thống.
-  * `email`: Bắt buộc, đúng định dạng RFC 5322 (ví dụ: `user@example.com`), duy nhất trong hệ thống.
-  * `password`: Bắt buộc, độ dài tối thiểu 6 ký tự, mã hóa một chiều bằng thuật toán `BCrypt` trước khi lưu vào DB.
-  * `confirmPassword`: Phải trùng khớp 100% với `password`.
-  * `phone`: Bắt buộc, định dạng 10 chữ số chuẩn số điện thoại Việt Nam (bắt đầu bằng đầu số 03, 05, 07, 08, 09).
-* **Đăng nhập (`/dangnhap`):**
-  * Kiểm tra tài khoản và mật khẩu thông qua `BCrypt.checkpw`.
-  * Nếu hợp lệ: Lưu session đối tượng `Account`, kiểm tra trạng thái hoạt động (`is_locked == false`), điều hướng người dùng theo role:
-    * Role 1 $\rightarrow$ `/tong-quan` (Admin Portal)
-    * Role 2 $\rightarrow$ `/shop` (Shop Dashboard)
-    * Role 3 $\rightarrow$ `/` hoặc `/user/shop` (Trang chủ người dùng)
-    * Role 4 $\rightarrow$ `/shipper/trangchucuashipper.jsp`
-  * Nếu không hợp lệ: Trả về thông báo lỗi "Tài khoản hoặc mật khẩu không chính xác" và giữ lại tên đăng nhập trên form.
+* **Đăng ký tài khoản (`/dangky` - `DangKyServlet`):**
+  * `username`: Bắt buộc. Chỉ được chứa chữ cái không dấu, chữ số và dấu gạch dưới (`_`), độ dài từ **3 đến 30 ký tự** (Regex: `^[a-zA-Z0-9_]{3,30}$`). Không được trùng với tài khoản đã tồn tại.
+  * `password`: Bắt buộc, độ dài từ **8 đến 16 ký tự**, không chứa khoảng trắng, loại bỏ khoảng trắng đầu/cuối trước khi kiểm tra (`trim()`). Được mã hóa an toàn bằng `BCrypt.hashpw(password, BCrypt.gensalt(12))`.
+  * `confirm_password`: Bắt buộc, phải trùng khớp 100% với `password`.
+  * `fullname`: Bắt buộc, không được để trống, độ dài tối đa **100 ký tự** (`InputValidationUtil.checkLine`).
+  * `phone`: Bắt buộc, độ dài tối đa **20 ký tự**, chỉ chứa chữ số và các ký tự `+ ( ) - .` (Regex: `^[0-9+()\\-. ]+$`).
+  * `email`: Bắt buộc, đúng định dạng email, không được trùng lặp trong hệ thống.
+  * `OTP Verification`: Sau khi form hợp lệ, hệ thống sinh mã OTP 6 số ngẫu nhiên qua `SecureRandom`, có thời hạn hiệu lực **5 phút** (`OTP_TTL_MILLIS = 300.000ms`), gửi qua email kích hoạt trước khi tài khoản được lưu chính thức.
+  * `Rate Limiting`: Giới hạn tối đa 10 lần yêu cầu gửi OTP trong 10 phút trên cùng 1 địa chỉ IP (`RateLimitUtil`).
+
+* **Đăng nhập (`/dangnhap` - `DangNhapServlet`):**
+  * `username`: Bắt buộc, chuẩn hóa lowercase và trim trước khi xử lý.
+  * `password`: Bắt buộc, so khớp mật khẩu bằng `BCrypt.checkpw(password, account.getPassword())`.
+  * `Rate Limiting brute-force`:
+    * Theo IP: Tối đa **5 lần thử sai liên tiếp** trong vòng 15 phút. Khi vượt ngưỡng, IP bị khóa tạm thời 15 phút.
+    * Theo Account: Tối đa **10 lần thử sai liên tiếp** trên cùng một tài khoản (chống tấn công phân tán qua botnet).
+  * `Kiểm tra trạng thái tài khoản`:
+    * Tài khoản bị đình chỉ mềm (`account.isDeleted() == true`): Chuyển về màn hình đăng nhập với thông báo đình chỉ kèm lý do và cho phép gửi đơn kháng nghị (`/appeal`).
+    * Tài khoản bị khóa vi phạm (`status.equalsIgnoreCase("BLOCKED")`): Chặn đăng nhập với thông báo khóa do bom hàng hoặc vi phạm điều khoản.
+  * `Điều hướng theo quyền (Role-based Routing)`:
+    * Role 1 (Super Admin) $\rightarrow$ `/tong-quan`
+    * Role 2 (Shop Owner) $\rightarrow$ `/shop`
+    * Role 3 (Khách hàng) $\rightarrow$ `/user/home`
+    * Role 4 (Shipper) $\rightarrow$ `/shipper/donhang`
+  * `Chống Session Fixation`: Cấp mới ID phiên làm việc (`req.changeSessionId()`) ngay sau khi đăng nhập thành công.
+
 * **Xác thực bảo mật thông tin nhạy cảm (`/xac-thuc-thay-doi`):**
-  * Khi tài khoản yêu cầu đổi email hoặc thay đổi thông tin số tài khoản ngân hàng, hệ thống gửi mã OTP 6 số qua email và yêu cầu xác thực trong vòng 5 phút trước khi ghi nhận thay đổi vào cơ sở dữ liệu.
+  * Khi tài khoản yêu cầu thay đổi Email hoặc Số tài khoản ngân hàng / PayOS API Key, hệ thống tự động sinh mã OTP 6 số gửi qua email và yêu cầu nhập mã xác thực trong 5 phút trước khi lưu thay đổi vào CSDL.
 
-### 3.2. Phân hệ Quản lý Món ăn & Topping (Shop Product & Topping CRUD)
-* **Quản lý món ăn (`/shop/products`):**
-  * Món ăn liên kết bắt buộc với một danh mục (`category_id`) thuộc về shop.
-  * Tên món ăn không được để trống, độ dài từ 2 đến 100 ký tự.
-  * Không áp dụng giá ở cấp món ăn; mỗi món ăn phải có ít nhất 1 kích cỡ (Size S/M/L) với giá bán tương ứng $> 0$ VNĐ.
-  * Hỗ trợ cờ đánh dấu `outOfStock` (hết hàng tạm thời theo từng size) mà không cần xóa sản phẩm khỏi thực đơn.
-* **Quản lý topping (`/shop/toppings`, `/shop/topping-categories`):**
-  * Topping thuộc về một nhóm topping (`ToppingCategory`).
-  * Một nhóm topping có thể áp dụng cho nhiều danh mục món ăn (quan hệ N-N qua bảng `ToppingCategory_ProductCategories`).
-  * Giá topping phải $\ge 0$ VNĐ.
+---
 
-### 3.3. Phân hệ Giỏ hàng & Thanh toán (Cart & Checkout)
-* **Giỏ hàng (`/cart`, `/cart-items`, `/user/add-to-cart`):**
-  * Khách hàng thêm món ăn vào giỏ kèm lựa chọn size cụ thể và danh sách topping đính kèm.
-  * Nếu shop hiện tại đang ngoài giờ hoạt động (`shop.isOpenNow() == false`), hệ thống từ chối thêm vào giỏ và thông báo "Quán hiện đang đóng cửa".
-* **Đặt hàng & Thanh toán (`/checkout`):**
-  * Khách hàng điền thông tin người nhận: Tên, Số điện thoại người nhận, Địa chỉ cụ thể.
-  * Bản đồ Leaflet tích hợp Nominatim Search cho phép ghim chính xác tọa độ (`locationX` - Vĩ độ, `locationY` - Kinh độ).
-  * Mã giảm giá (`Voucher`): Hệ thống tự động kiểm tra điều kiện giá trị đơn hàng tối thiểu, thời hạn voucher và tính toán mức chiết khấu hợp lệ (theo tỷ lệ % hoặc số tiền cố định hoặc miễn phí vận chuyển).
-  * Khởi tạo đơn hàng với trạng thái ban đầu là `PENDING`.
+### 3.2. Phân hệ Quản lý Danh mục & Món ăn (Shop Category & Product CRUD)
+* **Quản lý danh mục (`/Category` - `CategoryServlet`):**
+  * `shopId`: Bắt buộc $> 0$.
+  * `categoryName`: Bắt buộc, không được để trống hoặc chỉ chứa khoảng trắng (`isBlank()`).
+  * Các thao tác hỗ trợ: `create`, `update`, `delete`.
+* **Quản lý món ăn (`/Product` - `ProductServlet` & `/shop/products` - `ShopProductServlet`):**
+  * `productName`: Bắt buộc, không được để trống (`isBlank()`), độ dài từ 2 đến 100 ký tự.
+  * `shopId`: Bắt buộc $> 0$.
+  * `categoryId`: Bắt buộc $> 0$, phải thuộc về shop hiện tại.
+  * `price`: Bắt buộc $> 0$ (kiểu `BigDecimal`).
+  * `stockQuantity`: Số lượng tồn kho $\ge 0$ (nếu có cấu hình).
+  * `Size & Topping`: Mỗi món ăn cấu hình kích cỡ (Size S/M/L) với giá riêng và cờ `outOfStock` (hết hàng tạm thời theo từng kích cỡ).
+* **Quản lý topping (`/shop/toppings` - `ShopToppingServlet`):**
+  * Tên topping không được để trống.
+  * Giá bán của topping phải $\ge 0$ VNĐ.
 
-### 3.4. Phân hệ Theo dõi đơn hàng & WebSocket GPS Realtime
-* **Quy trình trạng thái đơn hàng (Order State Machine):**
+---
+
+### 3.3. Phân hệ Giỏ hàng & Đặt hàng (Cart, Voucher & Checkout)
+* **Kiểm tra trạng thái mở cửa của quán (`isOpenNow`):**
+  * Khi người dùng thêm món vào giỏ (`/cart`, `/user/add-to-cart`), hệ thống kiểm tra giờ hoạt động của quán (`shop.isOpenNow()`).
+  * Nếu quán hiện đang đóng cửa ngoài khung giờ phục vụ, hệ thống lập tức từ chối và cảnh báo lỗi `shop_closed`.
+* **Đặt hàng & Thanh toán (`/checkout` - `CheckoutServlet`):**
+  * Thông tin người nhận: Họ tên ($\le 100$ ký tự), SĐT nhận hàng ($\le 20$ ký tự, đúng regex), Địa chỉ giao hàng ($\le 500$ ký tự).
+  * Tọa độ bản đồ Leaflet: Ghi nhận vĩ độ `locationX` và kinh độ `locationY`.
+  * Mã giảm giá (`Voucher`):
+    * Kiểm tra ngày hết hạn (`expire_at`).
+    * Kiểm tra giá trị đơn hàng tối thiểu (`min_order_amount`).
+    * Tính toán mức giảm trừ: Theo số tiền cố định (`FIXED`) hoặc tỷ lệ phần trăm (`PERCENT`) kèm giới hạn tối đa.
+  * Trạng thái khởi tạo đơn hàng: Luôn luôn là `PENDING`.
+
+---
+
+### 3.4. Vòng đời đơn hàng & Theo dõi GPS Realtime
+* **Order State Machine:**
   $$\text{PENDING} \longrightarrow \text{CONFIRMED} \longrightarrow \text{READY\_FOR\_PICKUP} \longrightarrow \text{SHIPPING} \longrightarrow \text{DONE}$$
-* **WebSocket Realtime Tracking (`/ws/tracking`):**
-  * Khi shipper di chuyển giao hàng (`SHIPPING`), thiết bị shipper gửi tọa độ GPS định kỳ lên WebSocket endpoint `TrackingEndpoint`.
-  * Khách hàng theo dõi trên trang `/bill` hoặc `/user/donhang.jsp` được nhận tọa độ realtime hiển thị qua bản đồ 3 điểm (Quán ăn, Điểm giao, Vị trí shipper) kèm thời gian dự kiến đến (ETA).
+  *(Trạng thái hủy `CANCELLED` chỉ được phép khi đơn chưa chuyển sang `SHIPPING`).*
+* **Tích điểm thưởng (`Loyalty Points`):**
+  * Khi đơn hàng chuyển trạng thái sang `DONE`, khách hàng được cộng điểm thưởng tự động (100 điểm = đổi voucher 20.000đ). Không áp dụng cho đơn bán tại quầy POS.
+* **WebSocket GPS Realtime Tracking (`/ws/tracking` - `TrackingEndpoint`):**
+  * Shipper gửi tọa độ vị trí thực tế định kỳ, server chuyển tiếp tức thời qua WebSocket tới khách hàng để vẽ lộ trình shipper trên bản đồ OpenStreetMap/Leaflet.
